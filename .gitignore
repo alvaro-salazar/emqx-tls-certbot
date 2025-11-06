@@ -1,0 +1,50 @@
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+
+# Certificados SSL/TLS
+certs/
+emqx-certs/
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+
+# Archivos de Let's Encrypt
+letsencrypt/
+.letsencrypt/
+
+# Logs
+*.log
+logs/
+emqx_log/
+
+# Datos de Docker
+emqx_data/
+
+# IDEs y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+docker-compose.override.yaml
+docker-compose.override.yml
+
+# Archivos temporales
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+*.swp
+*~
