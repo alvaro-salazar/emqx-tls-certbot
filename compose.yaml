@@ -1,0 +1,91 @@
+services:
+  certbot:
+    image: certbot/certbot
+    container_name: certbot_tls
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./emqx-certs:/certs
+    ports:
+      - "80:80"
+    entrypoint: >
+      sh -c "
+        DOMAIN=$DOMAIN
+        EMAIL=$EMAIL
+        if [ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ]; then
+          echo '✅ Certificado ya existe. No se emitirá uno nuevo.';
+        elif [ -f /etc/letsencrypt/renewal/$DOMAIN.conf ]; then
+          echo '⚠️ Certificado ya fue solicitado recientemente. Esperando renovación automática.';
+        else
+          certbot certonly --standalone --agree-tos --no-eff-email --non-interactive --preferred-challenges http --domains $DOMAIN --email $EMAIL --deploy-hook 'chmod -R 644 /etc/letsencrypt/live /etc/letsencrypt/archive && chown -R 1883:1883 /etc/letsencrypt';
+        fi
+        echo '📄 Copiando .pem a /certs (resolviendo symlinks)';
+        mkdir -p /certs;
+        cp -L '/etc/letsencrypt/live/$DOMAIN/fullchain.pem' '/certs/fullchain.pem';
+        cp -L '/etc/letsencrypt/live/$DOMAIN/privkey.pem'   '/certs/privkey.pem';
+
+        # Propietario root y GRUPO 1000 (coincide con gid=1000 de emqx en el container)
+        chown root:1000 /certs/fullchain.pem /certs/privkey.pem
+        chmod 644 '/certs/fullchain.pem';      # público (cert)
+        chmod 640 '/certs/privkey.pem';       # clave: solo user+grupo
+        echo '✅ Certs listos en ./emqx-certs del host';"
+    # opcional: para renovar cada día a las 3am, dejar este contenedor corriendo y hacer renew en loop
+    # command: /bin/sh -c 'while true; do certbot renew && sleep 86400 || sleep 3600; done'
+    environment:
+      - DOMAIN=${DOMAIN}
+      - EMAIL=${EMAIL}
+    networks:
+      - mqtt_net
+
+  emqx:
+    image: emqx/emqx:5.6
+    container_name: emqx_tls
+    depends_on:
+      - certbot
+    restart: unless-stopped
+    environment:
+      # Dashboard (cámbialo apenas entres)
+      EMQX_DASHBOARD__DEFAULT_USERNAME: "${EMQX_ADMIN_USER}"
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: "${EMQX_ADMIN_PASS}"
+      EMQX_NODE__COOKIE: "${EMQX_COOKIE}"
+
+      # ACL basado en archivo
+      EMQX_AUTHORIZATION__SOURCES__1__TYPE: "file"
+      EMQX_AUTHORIZATION__SOURCES__1__PATH: "/opt/emqx/etc/acl.conf"
+
+      # Listener TLS en 8883
+      EMQX_LISTENERS__SSL__DEFAULT__ENABLE: "true"
+      EMQX_LISTENERS__SSL__DEFAULT__BIND: "0.0.0.0:8883"
+
+      # Certificados (LE en carpeta compartida)
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CERTFILE: "/certs/fullchain.pem"
+      EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__KEYFILE:  "/certs/privkey.pem"
+      # (Opcional) Endurecer TLS:
+      # EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__HONOR_CIPHER_ORDER: "true"
+      # EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CIPHERS: "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"
+
+      # (Opcional) Mutual TLS:
+      # EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__VERIFY: "verify_peer"
+      # EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__FAIL_IF_NO_PEER_CERT: "true"
+      # EMQX_LISTENERS__SSL__DEFAULT__SSL_OPTIONS__CACERTFILE: "/certs/ca.pem"
+
+    volumes:
+      - ./emqx-certs:/certs:ro           # ← SOLO los dos .pem que EMQX debe leer
+      - ./emqx-acl.conf:/opt/emqx/etc/acl.conf:ro  # ← Archivo ACL
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    ports:
+      - "8883:8883"     # MQTT sobre TLS
+      - "18083:18083"   # Dashboard
+      # - "1883:1883"   # MQTT sin TLS (opcional)
+      # - "8083:8083"   # WS
+      # - "8084:8084"   # WSS
+    networks:
+      - mqtt_net
+
+networks:
+  mqtt_net:
+    driver: bridge
+
+volumes:
+  emqx_data:
+  emqx_log:
