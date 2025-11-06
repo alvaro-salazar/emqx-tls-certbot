@@ -1,4 +1,4 @@
-# EMQX Certbot
+# EMQX TLS Certbot
 
 Proyecto Docker Compose para configurar EMQX (broker MQTT) con certificados SSL/TLS generados automáticamente mediante Let's Encrypt y Certbot.
 
